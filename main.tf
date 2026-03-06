@@ -77,17 +77,9 @@ resource "aws_iam_role_policy_attachment" "lambda_policy" {
   role       = aws_iam_role.iam_for_lambda.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
 }
-
-resource "aws_lambda_function" "guardar_usuario" {
-  function_name = "GuardarUsuarioDynamo"
-  role          = aws_iam_role.iam_for_lambda.arn
-  handler       = "index.handler"
-  runtime       = "nodejs18.x"
-
-  # Código sencillo para guardar en Dynamo
-  filename      = "lambda_function_payload.zip" # Terraform creará un archivo base
-  
-  inline_code = <<EOF
+# Primero, creamos el archivo de código
+resource "local_file" "lambda_script" {
+  content  = <<EOF
 const AWS = require('aws-sdk');
 const docClient = new AWS.DynamoDB.DocumentClient();
 
@@ -100,17 +92,45 @@ exports.handler = async (event) => {
             Nombre: body.Nombre
         }
     };
-    await docClient.put(params).promise();
-    return {
-        statusCode: 200,
-        headers: { "Access-Control-Allow-Origin": "*" },
-        body: JSON.stringify({ message: "Usuario Guardado!" })
-    };
+    try {
+        await docClient.put(params).promise();
+        return {
+            statusCode: 200,
+            headers: { 
+                "Access-Control-Allow-Origin": "*",
+                "Access-Control-Allow-Headers": "Content-Type",
+                "Access-Control-Allow-Methods": "POST"
+            },
+            body: JSON.stringify({ message: "Usuario Guardado!" })
+        };
+    } catch (err) {
+        return {
+            statusCode: 500,
+            body: JSON.stringify(err)
+        };
+    }
 };
 EOF
+  filename = "${path.module}/index.js"
 }
 
-# 4. LA "PUERTA" (API GATEWAY)
+# Empaquetamos el archivo en un ZIP (requisito de AWS)
+data "archive_file" "lambda_zip" {
+  type        = "zip"
+  source_file = local_file.lambda_script.filename
+  output_path = "${path.module}/lambda_function_payload.zip"
+}
+
+# Ahora sí, la función Lambda corregida
+resource "aws_lambda_function" "guardar_usuario" {
+  function_name    = "GuardarUsuarioDynamo"
+  role             = aws_iam_role.iam_for_lambda.arn
+  handler          = "index.handler"
+  runtime          = "nodejs18.x"
+  filename         = data.archive_file.lambda_zip.output_path
+  source_code_hash = data.archive_file.lambda_zip.output_base64sha256
+}
+# 4. LA PUERTA (API GATEWAY) - Esto es lo que te falta
 resource "aws_apigatewayv2_api" "api_lambda" {
   name          = "API-Usuarios-Ruben"
   protocol_type = "HTTP"
@@ -140,7 +160,7 @@ resource "aws_lambda_permission" "api_gw" {
   source_arn    = "${aws_apigatewayv2_api.api_lambda.execution_arn}/*/*"
 }
 
-# Mostrar la URL de la API al terminar
+# ESTO ES VITAL: Te dará la URL para pegar en tu App.jsx
 output "api_url" {
   value = "${aws_apigatewayv2_api.api_lambda.api_endpoint}/usuarios"
 }
