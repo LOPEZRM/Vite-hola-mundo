@@ -9,7 +9,8 @@ function App() {
   const [status, setStatus] = useState('')
 
   // CAMBIA ESTO: Pega aquí la URL que te salió en la terminal (api_url)
-  const AWS_API_URL = 'https://dltj87r52c.execute-api.us-east-1.amazonaws.com/usuarios'
+  // En App.jsx
+const AWS_API_URL = 'https://dltj87r52c.execute-api.us-east-1.amazonaws.com' // <-- SIN EL /usuarios
 
   const handleSubmit = async (e) => {
     e.preventDefault()

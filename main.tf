@@ -59,7 +59,7 @@ resource "aws_dynamodb_table" "mi_tabla" {
 
 # 3. EL "CEREBRO" (FUNCIÓN LAMBDA)
 resource "aws_iam_role" "iam_for_lambda" {
-  name = "role_lambda_dynamo_v2" # Nombre único por si acaso
+  name = "role_lambda_final_ruben" # Nombre nuevo para evitar conflictos
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -76,7 +76,6 @@ resource "aws_iam_role_policy_attachment" "lambda_policy" {
   policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
 }
 
-# ARCHIVO DE CÓDIGO CON HEADERS DE CORS Y MANEJO DE OPTIONS
 resource "local_file" "lambda_script" {
   content  = <<EOF
 const AWS = require('aws-sdk');
@@ -85,11 +84,10 @@ const docClient = new AWS.DynamoDB.DocumentClient();
 exports.handler = async (event) => {
     const headers = {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type"
+        "Access-Control-Allow-Methods": "*",
+        "Access-Control-Allow-Headers": "*"
     };
 
-    // Si el navegador pregunta (OPTIONS), respondemos que sí de inmediato
     if (event.requestContext && event.requestContext.http && event.requestContext.http.method === 'OPTIONS') {
         return { statusCode: 200, headers, body: '' };
     }
@@ -136,15 +134,21 @@ resource "aws_lambda_function" "guardar_usuario" {
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 }
 
-# 4. API GATEWAY CON CONFIGURACIÓN DE CORS
+# 4. API GATEWAY UNIVERSAL ($default)
 resource "aws_apigatewayv2_api" "api_lambda" {
   name          = "API-Usuarios-Ruben"
   protocol_type = "HTTP"
   cors_configuration {
     allow_origins = ["*"]
-    allow_methods = ["POST", "OPTIONS"]
-    allow_headers = ["content-type"]
+    allow_methods = ["*"]
+    allow_headers = ["*"]
   }
+}
+
+resource "aws_apigatewayv2_stage" "default" {
+  api_id      = aws_apigatewayv2_api.api_lambda.id
+  name        = "$default"
+  auto_deploy = true
 }
 
 resource "aws_apigatewayv2_integration" "lambda_integration" {
@@ -153,17 +157,9 @@ resource "aws_apigatewayv2_integration" "lambda_integration" {
   integration_uri  = aws_lambda_function.guardar_usuario.invoke_arn
 }
 
-# Ruta para el POST real
-resource "aws_apigatewayv2_route" "post_route" {
+resource "aws_apigatewayv2_route" "catch_all" {
   api_id    = aws_apigatewayv2_api.api_lambda.id
-  route_key = "POST /usuarios"
-  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
-}
-
-# Ruta para el OPTIONS (Pre-vuelo del navegador)
-resource "aws_apigatewayv2_route" "options_route" {
-  api_id    = aws_apigatewayv2_api.api_lambda.id
-  route_key = "OPTIONS /usuarios"
+  route_key = "$default" 
   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
 }
 
@@ -175,5 +171,5 @@ resource "aws_lambda_permission" "api_gw" {
 }
 
 output "api_url" {
-  value = "${aws_apigatewayv2_api.api_lambda.api_endpoint}/usuarios"
+  value = aws_apigatewayv2_api.api_lambda.api_endpoint
 }

@@ -4,11 +4,10 @@ const docClient = new AWS.DynamoDB.DocumentClient();
 exports.handler = async (event) => {
     const headers = {
         "Access-Control-Allow-Origin": "*",
-        "Access-Control-Allow-Methods": "POST, OPTIONS",
-        "Access-Control-Allow-Headers": "Content-Type"
+        "Access-Control-Allow-Methods": "*",
+        "Access-Control-Allow-Headers": "*"
     };
 
-    // Si el navegador pregunta (OPTIONS), respondemos que sí de inmediato
     if (event.requestContext && event.requestContext.http && event.requestContext.http.method === 'OPTIONS') {
         return { statusCode: 200, headers, body: '' };
     }
