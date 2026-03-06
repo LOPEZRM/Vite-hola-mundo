@@ -59,7 +59,7 @@ resource "aws_dynamodb_table" "mi_tabla" {
 
 # 3. EL "CEREBRO" (FUNCIÓN LAMBDA)
 resource "aws_iam_role" "iam_for_lambda" {
-  name = "role_lambda_final_ruben" # Nombre nuevo para evitar conflictos
+  name = "role_lambda_final_ruben_v3"
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
