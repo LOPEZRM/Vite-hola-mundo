@@ -9,7 +9,7 @@ function App() {
   const [status, setStatus] = useState('')
 
   // CAMBIA ESTO: Pega aquí la URL que te salió en la terminal (api_url)
-  const AWS_API_URL = 'TU_URL_DE_API_GATEWAY_AQUI/usuarios'
+  const AWS_API_URL = 'https://dltj87r52c.execute-api.us-east-1.amazonaws.com/usuarios'
 
   const handleSubmit = async (e) => {
     e.preventDefault()
