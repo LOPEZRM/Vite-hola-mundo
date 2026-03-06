@@ -34,7 +34,7 @@ frontend:
 EOT
 
   custom_rule {
-    source = "</^((?!\\.).)*$/>"
+    source = "/^((?!\\.).)*$/"
     target = "/index.html"
     status = "200"
   }
@@ -58,9 +58,8 @@ resource "aws_dynamodb_table" "mi_tabla" {
 }
 
 # 3. EL "CEREBRO" (FUNCIÓN LAMBDA)
-# Esta función es la que escribe en DynamoDB
 resource "aws_iam_role" "iam_for_lambda" {
-  name = "role_lambda_dynamo"
+  name = "role_lambda_dynamo_v2" # Nombre único por si acaso
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -72,41 +71,49 @@ resource "aws_iam_role" "iam_for_lambda" {
   })
 }
 
-# Le damos permiso a la Lambda de escribir en la tabla
 resource "aws_iam_role_policy_attachment" "lambda_policy" {
   role       = aws_iam_role.iam_for_lambda.name
   policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
 }
-# Primero, creamos el archivo de código
+
+# ARCHIVO DE CÓDIGO CON HEADERS DE CORS Y MANEJO DE OPTIONS
 resource "local_file" "lambda_script" {
   content  = <<EOF
 const AWS = require('aws-sdk');
 const docClient = new AWS.DynamoDB.DocumentClient();
 
 exports.handler = async (event) => {
-    const body = JSON.parse(event.body);
-    const params = {
-        TableName: "TablaUsuariosRuben",
-        Item: {
-            UserId: body.UserId,
-            Nombre: body.Nombre
-        }
+    const headers = {
+        "Access-Control-Allow-Origin": "*",
+        "Access-Control-Allow-Methods": "POST, OPTIONS",
+        "Access-Control-Allow-Headers": "Content-Type"
     };
+
+    // Si el navegador pregunta (OPTIONS), respondemos que sí de inmediato
+    if (event.requestContext && event.requestContext.http && event.requestContext.http.method === 'OPTIONS') {
+        return { statusCode: 200, headers, body: '' };
+    }
+
     try {
+        const body = JSON.parse(event.body);
+        const params = {
+            TableName: "TablaUsuariosRuben",
+            Item: {
+                UserId: body.UserId,
+                Nombre: body.Nombre
+            }
+        };
         await docClient.put(params).promise();
         return {
             statusCode: 200,
-            headers: { 
-                "Access-Control-Allow-Origin": "*",
-                "Access-Control-Allow-Headers": "Content-Type",
-                "Access-Control-Allow-Methods": "POST"
-            },
+            headers,
             body: JSON.stringify({ message: "Usuario Guardado!" })
         };
     } catch (err) {
         return {
             statusCode: 500,
-            body: JSON.stringify(err)
+            headers,
+            body: JSON.stringify({ error: err.message })
         };
     }
 };
@@ -114,14 +121,12 @@ EOF
   filename = "${path.module}/index.js"
 }
 
-# Empaquetamos el archivo en un ZIP (requisito de AWS)
 data "archive_file" "lambda_zip" {
   type        = "zip"
   source_file = local_file.lambda_script.filename
   output_path = "${path.module}/lambda_function_payload.zip"
 }
 
-# Ahora sí, la función Lambda corregida
 resource "aws_lambda_function" "guardar_usuario" {
   function_name    = "GuardarUsuarioDynamo"
   role             = aws_iam_role.iam_for_lambda.arn
@@ -130,13 +135,14 @@ resource "aws_lambda_function" "guardar_usuario" {
   filename         = data.archive_file.lambda_zip.output_path
   source_code_hash = data.archive_file.lambda_zip.output_base64sha256
 }
-# 4. LA PUERTA (API GATEWAY) - Esto es lo que te falta
+
+# 4. API GATEWAY CON CONFIGURACIÓN DE CORS
 resource "aws_apigatewayv2_api" "api_lambda" {
   name          = "API-Usuarios-Ruben"
   protocol_type = "HTTP"
   cors_configuration {
     allow_origins = ["*"]
-    allow_methods = ["POST"]
+    allow_methods = ["POST", "OPTIONS"]
     allow_headers = ["content-type"]
   }
 }
@@ -147,9 +153,17 @@ resource "aws_apigatewayv2_integration" "lambda_integration" {
   integration_uri  = aws_lambda_function.guardar_usuario.invoke_arn
 }
 
+# Ruta para el POST real
 resource "aws_apigatewayv2_route" "post_route" {
   api_id    = aws_apigatewayv2_api.api_lambda.id
   route_key = "POST /usuarios"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+}
+
+# Ruta para el OPTIONS (Pre-vuelo del navegador)
+resource "aws_apigatewayv2_route" "options_route" {
+  api_id    = aws_apigatewayv2_api.api_lambda.id
+  route_key = "OPTIONS /usuarios"
   target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
 }
 
@@ -160,7 +174,6 @@ resource "aws_lambda_permission" "api_gw" {
   source_arn    = "${aws_apigatewayv2_api.api_lambda.execution_arn}/*/*"
 }
 
-# ESTO ES VITAL: Te dará la URL para pegar en tu App.jsx
 output "api_url" {
   value = "${aws_apigatewayv2_api.api_lambda.api_endpoint}/usuarios"
 }
