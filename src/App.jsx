@@ -4,28 +4,39 @@ import viteLogo from '/vite.svg'
 import './App.css'
 
 function App() {
-  // Estados para el formulario
   const [userId, setUserId] = useState('')
   const [nombre, setNombre] = useState('')
   const [status, setStatus] = useState('')
 
+  // CAMBIA ESTO: Pega aquí la URL que te salió en la terminal (api_url)
+  const AWS_API_URL = 'TU_URL_DE_API_GATEWAY_AQUI/usuarios'
+
   const handleSubmit = async (e) => {
     e.preventDefault()
-    setStatus('Conectando con DynamoDB...')
+    setStatus('🚀 Enviando datos a AWS...')
 
     try {
-      // Aquí es donde la magia ocurre:
-      // Se enviaría el objeto { UserId: userId, Nombre: nombre } a AWS
-      console.log("Enviando a TablaUsuariosRuben:", { UserId: userId, Nombre: nombre })
-      
-      // Simulamos la respuesta de AWS
-      setTimeout(() => {
-        setStatus(`✅ ¡Éxito! ${nombre} guardado correctamente.`)
+      const response = await fetch(AWS_API_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          UserId: userId,
+          Nombre: nombre
+        }),
+      })
+
+      if (response.ok) {
+        setStatus(`✅ ¡Éxito! ${nombre} guardado en DynamoDB.`)
         setUserId('')
         setNombre('')
-      }, 1500)
+      } else {
+        throw new Error('Error en la respuesta de la API')
+      }
     } catch (error) {
-      setStatus('❌ Error al conectar con AWS.')
+      console.error(error)
+      setStatus('❌ Error: No se pudo conectar con AWS.')
     }
   }
 
@@ -43,14 +54,14 @@ function App() {
       <h1>Vite + AWS DynamoDB</h1>
       
       <div className="card">
-        <h3>Registro de Usuarios</h3>
+        <h3>Registro de Usuarios Real</h3>
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
           <input 
             type="text" 
             placeholder="ID de Usuario (Ej: 001)" 
             value={userId}
             onChange={(e) => setUserId(e.target.value)}
-            style={{ padding: '8px', borderRadius: '5px', border: '1px solid #ccc' }}
+            style={{ padding: '8px', borderRadius: '5px', border: '1px solid #ccc', color: 'black' }}
             required 
           />
           <input 
@@ -58,10 +69,10 @@ function App() {
             placeholder="Nombre Completo" 
             value={nombre}
             onChange={(e) => setNombre(e.target.value)}
-            style={{ padding: '8px', borderRadius: '5px', border: '1px solid #ccc' }}
+            style={{ padding: '8px', borderRadius: '5px', border: '1px solid #ccc', color: 'black' }}
             required 
           />
-          <button type="submit" style={{ backgroundColor: '#ff9900', color: 'white' }}>
+          <button type="submit" style={{ backgroundColor: '#ff9900', color: 'white', fontWeight: 'bold' }}>
             Guardar en DynamoDB
           </button>
         </form>

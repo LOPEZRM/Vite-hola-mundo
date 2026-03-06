@@ -57,24 +57,90 @@ resource "aws_dynamodb_table" "mi_tabla" {
   }
 }
 
-# 3. PERMISOS (IAM) PARA QUE TU APP PUEDA USAR LA TABLA
-resource "aws_iam_policy" "amplify_dynamo_policy" {
-  name        = "AmplifyDynamoAccessPolicy"
-  description = "Permite que Amplify escriba en DynamoDB"
+# 3. EL "CEREBRO" (FUNCIÓN LAMBDA)
+# Esta función es la que escribe en DynamoDB
+resource "aws_iam_role" "iam_for_lambda" {
+  name = "role_lambda_dynamo"
 
-  policy = jsonencode({
+  assume_role_policy = jsonencode({
     Version = "2012-10-17"
-    Statement = [
-      {
-        Action = [
-          "dynamodb:PutItem",
-          "dynamodb:GetItem",
-          "dynamodb:UpdateItem",
-          "dynamodb:Scan"
-        ]
-        Effect   = "Allow"
-        Resource = aws_dynamodb_table.mi_tabla.arn
-      }
-    ]
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = { Service = "lambda.amazonaws.com" }
+    }]
   })
+}
+
+# Le damos permiso a la Lambda de escribir en la tabla
+resource "aws_iam_role_policy_attachment" "lambda_policy" {
+  role       = aws_iam_role.iam_for_lambda.name
+  policy_arn = "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
+}
+
+resource "aws_lambda_function" "guardar_usuario" {
+  function_name = "GuardarUsuarioDynamo"
+  role          = aws_iam_role.iam_for_lambda.arn
+  handler       = "index.handler"
+  runtime       = "nodejs18.x"
+
+  # Código sencillo para guardar en Dynamo
+  filename      = "lambda_function_payload.zip" # Terraform creará un archivo base
+  
+  inline_code = <<EOF
+const AWS = require('aws-sdk');
+const docClient = new AWS.DynamoDB.DocumentClient();
+
+exports.handler = async (event) => {
+    const body = JSON.parse(event.body);
+    const params = {
+        TableName: "TablaUsuariosRuben",
+        Item: {
+            UserId: body.UserId,
+            Nombre: body.Nombre
+        }
+    };
+    await docClient.put(params).promise();
+    return {
+        statusCode: 200,
+        headers: { "Access-Control-Allow-Origin": "*" },
+        body: JSON.stringify({ message: "Usuario Guardado!" })
+    };
+};
+EOF
+}
+
+# 4. LA "PUERTA" (API GATEWAY)
+resource "aws_apigatewayv2_api" "api_lambda" {
+  name          = "API-Usuarios-Ruben"
+  protocol_type = "HTTP"
+  cors_configuration {
+    allow_origins = ["*"]
+    allow_methods = ["POST"]
+    allow_headers = ["content-type"]
+  }
+}
+
+resource "aws_apigatewayv2_integration" "lambda_integration" {
+  api_id           = aws_apigatewayv2_api.api_lambda.id
+  integration_type = "AWS_PROXY"
+  integration_uri  = aws_lambda_function.guardar_usuario.invoke_arn
+}
+
+resource "aws_apigatewayv2_route" "post_route" {
+  api_id    = aws_apigatewayv2_api.api_lambda.id
+  route_key = "POST /usuarios"
+  target    = "integrations/${aws_apigatewayv2_integration.lambda_integration.id}"
+}
+
+resource "aws_lambda_permission" "api_gw" {
+  action        = "lambda:InvokeFunction"
+  function_name = aws_lambda_function.guardar_usuario.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${aws_apigatewayv2_api.api_lambda.execution_arn}/*/*"
+}
+
+# Mostrar la URL de la API al terminar
+output "api_url" {
+  value = "${aws_apigatewayv2_api.api_lambda.api_endpoint}/usuarios"
 }
